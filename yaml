@@ -1,0 +1,107 @@
+# Promo detection & classification for Safeway ads/product pages
+# Priority order matters: first matching rule wins.
+
+version: 1
+defaults:
+  requires_loyalty: false
+  requires_digital: false
+
+patterns:
+
+  # --- DIGITAL/APP-ONLY ---
+  - name: DIGITAL_COUPON
+    promo_type: DIGITAL_COUPON
+    requires_loyalty: true
+    requires_digital: true
+    regex:
+      - "(?i)(digital\\s+coupon|clip\\s+(this\\s+)?deal|load\\s+to\\s+(card|app)|just\\s+for\\s+u\\b)"
+      - "(?i)(online\\s+only|in-app\\s+only)"
+  
+  # --- MEMBER/CLUB PRICE (no explicit clipping required) ---
+  - name: MEMBER_PRICE
+    promo_type: MEMBER_PRICE
+    requires_loyalty: true
+    requires_digital: false
+    regex:
+      - "(?i)(club\\s+price|member\\s+price|with\\s+(card|membership))"
+
+  # --- MULTI-BUY / PRICE BREAKS ---
+  - name: MULTIBUY_PRICE
+    promo_type: MULTIBUY
+    regex:
+      - "(?i)(\\b\\d+\\s*for\\s*\\$\\s*\\d+(?:\\.\\d{1,2})?\\b)"
+      - "(?i)(mix\\s*&\\s*match)"
+    extract:
+      # When possible, compute unit price (price / qty)
+      min_qty: "(?i)\\b(\\d+)\\s*for\\s*\\$\\s*(\\d+(?:\\.\\d{1,2})?)"
+      observed_price_formula: "price_per_unit = group2 / group1"
+
+  # --- BOGO & VARIANTS ---
+  - name: BOGO_PRICE
+    promo_type: BOGO
+    regex:
+      - "(?i)(bogo|buy\\s*1\\s*get\\s*1|buy\\s*\\d+\\s*get\\s*\\d+)"
+    extract:
+      buy_qty: "(?i)buy\\s*(\\d+)"
+      get_qty: "(?i)get\\s*(\\d+)"
+
+  # --- PERCENT-OFF ---
+  - name: PERCENT_OFF
+    promo_type: PERCENT_OFF
+    regex:
+      - "(?i)\\b(\\d{1,3})%\\s*off\\b"
+    extract:
+      percent_off: "(?i)\\b(\\d{1,3})%\\s*off\\b"
+
+  # --- THRESHOLD SPEND OFFERS ---
+  - name: THRESHOLD
+    promo_type: THRESHOLD
+    regex:
+      - "(?i)(save\\s*\\$\\s*\\d+\\s*when\\s*you\\s*spend\\s*\\$\\s*\\d+)"
+      - "(?i)(when\\s*you\\s*buy\\s*\\d+\\+?)"
+
+  # --- LIMITS / QUANTITY CAPS ---
+  - name: LIMIT
+    promo_type: LIMIT
+    regex:
+      - "(?i)\\blimit\\s*\\d+\\b"
+    extract:
+      limit_qty: "(?i)\\blimit\\s*(\\d+)\\b"
+
+  # --- GENERIC SALE TERMS ---
+  - name: SALE_GENERIC
+    promo_type: SALE
+    regex:
+      - "(?i)\\b(sale|special|hot\\s+deal|doorbuster|this\\s+week\\s+only|limited\\s+time)\\b"
+
+# Price extraction helpers (used by parsers/OCR post-processing)
+price_patterns:
+  # $2.99  |  2.99  |  $ 2.99
+  - "(?<!\\d)\\$\\s*(\\d{1,4}(?:\\.\\d{1,2})?)"
+  - "(?<!\\$)\\b(\\d{1,4}\\.\\d{1,2})\\b"
+quantity_patterns:
+  - "(?i)\\b(\\d+(?:\\.\\d+)?)\\s*(oz|lb|g|kg|ct|gal|liter|l|ml)\\b"
+  - "(?i)\\b(\\d+)\\s*ct\\b"
+unit_hints:
+  per_unit_tokens: ["per", "/", "ea", "each", "lb", "oz"]
+  weight_units: ["lb", "oz", "g", "kg"]
+  volume_units: ["gal", "l", "ml", "liter"]
+
+# Final labels to attach to each observation:
+schema:
+  - observed_price
+  - unit_price
+  - promo_flag            # true if any pattern matched
+  - promo_type            # DIGITAL_COUPON | MEMBER_PRICE | SALE | MULTIBUY | BOGO | PERCENT_OFF | THRESHOLD | LIMIT | NONE
+  - promo_text_raw
+  - requires_loyalty      # boolean
+  - requires_digital      # boolean
+  - min_qty               # int or null
+  - limit_qty             # int or null
+  - buy_qty               # for BOGO
+  - get_qty               # for BOGO
+  - percent_off
+  - regular_price         # if visible (e.g., “Regular Price $X.XX”)
+  - member_price          # if visible separately from digital
+  - digital_price         # if visible
+priority: [DIGITAL_COUPON, MEMBER_PRICE, MULTIBUY, BOGO, PERCENT_OFF, THRESHOLD, LIMIT, SALE]
